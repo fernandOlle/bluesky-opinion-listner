@@ -1,48 +1,25 @@
 import AtProto from '@atproto/api';
-import { cborDecodeMulti, cborDecode } from '@atproto/common';
-import WebSocket from 'ws';
+import { cborDecode, cborDecodeMulti } from '@atproto/common';
 import { CarReader } from '@ipld/car/reader';
 import process from 'process';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const VAMPETAS_DIR = path.join(__dirname, 'vampetas');
+import WebSocket from 'ws';
 
 const agent = new AtProto.BskyAgent({
   service: 'https://bsky.social',
 });
 
-/**
- * Bot credentials.
- * TODO: Change to custom handle.
- */
+const agentExp = new AtProto.BskyAgent({
+  service: 'https://bsky.social',
+});
+
+
 await agent.login({
   identifier: process.env.BLUESKY_USERNAME!,
   password: process.env.BLUESKY_PASSWORD!,
 });
 
-function getRandomVampetaImage(): Uint8Array {
-  const files = fs.readdirSync(VAMPETAS_DIR);
-  const images = files.filter((file) => (
-    /**
-     * Bluesky only supports PNG and JPG images.
-     */
-    /\.(png|jpg)$/i.test(file)
-  ));
 
-  const n = Math.floor(Math.random() * images.length);
 
-  const imagePath = images[n];
-  const image = fs.readFileSync(
-    path.join(VAMPETAS_DIR, imagePath),
-  );
-
-  return new Uint8Array(image);
-}
 
 type Payload =
   & AtProto.ComAtprotoSyncSubscribeRepos.Commit
@@ -54,9 +31,13 @@ const ws = new WebSocket(
   'wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos'
 );
 
-/**
- * TODO: Needs to add error and close event handlers.
- */
+const args = process.argv.slice(2);
+const keyWord = args[0];
+// const password = args[1];
+
+console.log(`Escutando mensagens sobre: [${keyWord}]`);
+
+
 ws.on('message', async (data: Uint8Array) => {
   const [, payload] = cborDecodeMulti(
     data,
@@ -90,59 +71,15 @@ ws.on('message', async (data: Uint8Array) => {
       block.bytes,
     ) as AtProto.AppBskyFeedPost.Record;
 
-    /**
-     * Only replies to posts that contain text the and
-     * belongs to a thread.
-     */
-    const isNotTextNorReply = !post?.text && !post?.reply;
+    const regex = new RegExp(keyWord, 'gmi');
+    const hasTag = regex.test(post.text);
 
-    if (isNotTextNorReply) {
+    if (!hasTag) {
       return;
     }
 
-    const hasVampetacoHashTag = /#vampeta(ç|c)o/gmi.test(post.text);
+    console.log(post)
 
-    if (!hasVampetacoHashTag) {
-      return;
-    }
-
-    const { data: { blob: image } } = await agent.uploadBlob(
-      getRandomVampetaImage(),
-      { encoding: 'image/png' },
-    );
-
-    const createdAt = new Date().toISOString();
-    const uri = `at://${repo}/${op.path}`;
-
-    const reply = {
-      createdAt,
-      text: '',
-      reply: {
-        /**
-         * Reply to the post where the hashtag was found.
-         */
-        root: post.reply!.root,
-        parent: {
-          uri,
-          cid: op.cid.toString(),
-        },
-      },
-      embed: {
-        $type: 'app.bsky.embed.images',
-        images: [
-          {
-            image,
-            alt: 'Foto do jogador Vampeta em momentos duvidosos.'
-          },
-        ],
-      },
-    };
-
-    await agent.post(reply);
-    /**
-     * Just for debugging purposes.
-     */
-    console.log(reply);
   } catch (exception) {
     console.error(exception);
   }
